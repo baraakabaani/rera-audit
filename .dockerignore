@@ -1,0 +1,28 @@
+# version control / editor
+.git
+.gitignore
+.claude
+.vscode
+.idea
+
+# python
+**/__pycache__
+**/*.pyc
+backend/.venv
+backend/venv
+backend/.env
+backend/storage/*
+!backend/storage/.gitkeep
+
+# node
+frontend/node_modules
+frontend/dist
+frontend/.env
+
+# docs / misc (not needed in the image)
+*.md
+docs/
+
+# local sample customer documents (uploaded at runtime instead)
+rerea/
+"3. Interim RERA Audit_Park Ville_Financials_Interim Report & Annexures_June 30, 2026 V01.xlsx"
