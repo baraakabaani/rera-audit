@@ -129,12 +129,25 @@ counts them. Manage via `GET /api/learning` (stats) and `DELETE /api/learning`
   verification, "Not applicable" where the JOP has no such item). With an LLM key
   the findings are re-drafted from the actual customer files. Defined in
   `services/procedures.py`.
-* **LLM annexure pass** (when a key is set) — the model is shown each remaining
-  sheet's exact layout + the extracted figures and returns precise cell writes
-  (formulas for anything calculated, blanks where there's no data). Guardrails:
-  never overwrites a label or an existing formula, appended cells inherit the
-  style of the rows above. Every LLM write is logged with its provider in the
-  generation report.
+* **LLM workbook pass** (when a key is set) — a 4-step pipeline in
+  `services/workbook_llm.py`:
+  1. **classify** each customer spreadsheet (trial balance, bank, invoice
+     schedule, budget, collection report, GL extract);
+  2. **extract** — one small-model call per financial file turns the raw rows
+     (a Mollak trial balance is ~450) into a structured JSON of accounting facts
+     (income / expenditure / assets / liabilities lines, fund balances, bank
+     closings, unit-receivable total, supplier balances, budget lines);
+  3. **consolidate** into one FactBook;
+  4. **map** — the FactBook + each sheet's exact layout go to the main model,
+     which returns the cell writes to populate *every* data cell (2 sheets per
+     call to stay under free-tier limits). Totals / sub-totals / differences /
+     cross-sheet references are written as Excel formulas; a cell is left blank
+     only when the FactBook has nothing for it.
+  Guardrails: never overwrites an existing formula or a text label; appended
+  cells inherit the style of the rows above; every write is logged with its
+  provider. Rate-limit / transient errors are retried with the server-suggested
+  delay. ~9 model calls per workbook on Groq; extraction is cached per file so
+  regenerating is fast.
 
 **2. Filled requirements checklist** (`Requirements_Checklist_Filled.xlsx`)
 

@@ -216,3 +216,48 @@ def full_text(path: Path) -> str:
     except Exception:
         return ""
     return ""
+
+
+def full_table_text(path: Path, max_rows: int = 220, max_cols: int = 12) -> str:
+    """Dump a spreadsheet's rows as pipe-delimited text for LLM extraction -
+    far more rows than the on-screen excerpt (a Mollak trial balance is ~450)."""
+    ext = path.suffix.lower()
+    parts: list[str] = []
+    try:
+        if ext == ".xlsx":
+            import openpyxl
+
+            wb = openpyxl.load_workbook(str(path), data_only=True, read_only=True)
+            for sn in wb.sheetnames:
+                ws = wb[sn]
+                parts.append(f"# sheet: {sn}")
+                for i, row in enumerate(ws.iter_rows(values_only=True)):
+                    if i >= max_rows:
+                        parts.append("# ...(truncated)")
+                        break
+                    cells = [
+                        "" if v is None else (f"{v:.2f}" if isinstance(v, float) else str(v))
+                        for v in row[:max_cols]
+                    ]
+                    if any(c.strip() for c in cells):
+                        parts.append(" | ".join(cells).rstrip(" |"))
+            wb.close()
+        elif ext in (".xls", ".csv"):
+            import pandas as pd
+
+            frames = (
+                {"csv": pd.read_csv(path, dtype=str, header=None, nrows=max_rows, on_bad_lines="skip")}
+                if ext == ".csv"
+                else pd.read_excel(path, sheet_name=None, dtype=str, header=None, engine="xlrd")
+            )
+            for sn, df in frames.items():
+                parts.append(f"# sheet: {sn}")
+                for row in df.head(max_rows).values.tolist():
+                    cells = ["" if (v is None or str(v) == "nan") else str(v) for v in row[:max_cols]]
+                    if any(c.strip() for c in cells):
+                        parts.append(" | ".join(cells).rstrip(" |"))
+        else:
+            return full_text(path)[:12000]
+    except Exception as exc:  # noqa: BLE001
+        return f"(could not read: {exc})"
+    return "\n".join(parts)[:16000]

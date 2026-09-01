@@ -119,6 +119,7 @@ def build_workbook(sid: str, body: WorkbookRequest | None = None) -> WorkbookRep
             period_end=body.period_end if body else None,
             context=context,
             preparer_explicit=bool(body and body.prepared_by),
+            doc_paths=_doc_inputs(sess),
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, f"workbook generation failed: {exc}")

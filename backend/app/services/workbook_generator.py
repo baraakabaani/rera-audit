@@ -942,14 +942,16 @@ def _apply_llm_writes(w: _Writer, proposals: list[dict], done: set[tuple[str, st
 
         cur = ws.cell(row=r, column=c).value
         # never touch an existing formula, and never overwrite a text
-        # label/heading - only blank cells or genuine ______ placeholders
+        # label/heading - only blank cells, numbers, or genuine ______ placeholders
+        if isinstance(cur, str) and cur.startswith("="):
+            skipped += 1
+            continue
         if isinstance(cur, str) and cur.strip() and not _PLACEHOLDER_RE.search(cur):
-            skipped += 1
-            continue
-        # don't fight the deterministic pass on plain numbers
-        if (ws.title, ref) in done and isinstance(cur, (int, float)) and isinstance(val, float):
-            skipped += 1
-            continue
+            # allow the model to replace a short header-ish string only when it is
+            # writing a formula there; otherwise protect the label
+            if not (isinstance(val, str) and val.startswith("=") and len(cur) < 40):
+                skipped += 1
+                continue
 
         w.put(ws, r, c, val, f"llm:{llm_client.provider_name()}", inherit=True)
         applied += 1
@@ -972,6 +974,7 @@ def generate_workbook(
     period_end: str | None = None,
     context: EntityContext | None = None,
     preparer_explicit: bool = False,
+    doc_paths: list | None = None,
 ) -> WorkbookReport:
     wb = openpyxl.load_workbook(str(template_path), data_only=False)
     w = _Writer(wb)
@@ -1003,7 +1006,9 @@ def generate_workbook(
     if LLM_WORKBOOK and llm_client.available():
         done_cells = {(cw.sheet, cw.cell) for cw in w.writes}
         try:
-            _apply_llm_writes(w, workbook_llm.propose_writes(wb, ctx, financials), done_cells)
+            _apply_llm_writes(
+                w, workbook_llm.propose_writes(wb, ctx, financials, doc_paths or []), done_cells
+            )
         except Exception as exc:  # noqa: BLE001
             w.warnings.append(f"LLM annexure pass skipped: {type(exc).__name__}: {exc}")
 

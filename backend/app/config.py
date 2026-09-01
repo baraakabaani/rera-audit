@@ -62,6 +62,7 @@ if _railway_domain:
 LLM_ENABLED = _bool("LLM_ENABLED", True)
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "auto").strip().lower()  # auto|groq|openai|anthropic|off
 LLM_MODEL = os.environ.get("LLM_MODEL", "").strip()                    # blank -> provider default
+LLM_EXTRACT_MODEL = os.environ.get("LLM_EXTRACT_MODEL", "").strip()    # blank -> LLM_MODEL / default
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1").strip()
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "").strip()

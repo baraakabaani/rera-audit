@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 from functools import lru_cache
 from pathlib import Path
 
@@ -63,43 +65,74 @@ def _openai_client(provider: str):
     return OpenAI(base_url=config.OPENAI_BASE_URL or None)  # OPENAI_API_KEY from env
 
 
-def chat_json(system: str, user: str, *, max_tokens: int = 4000) -> dict:
-    """Send one prompt, parse the reply as a JSON object. Raises on failure."""
+_RETRYABLE = ("rate limit", "429", "too many requests", "overloaded", "503", "502", "timeout")
+
+
+def _retry_after(err: Exception) -> float:
+    m = re.search(r"try again in ([\d.]+)s", str(err)) or re.search(r"retry.after[\"':\s]+([\d.]+)", str(err), re.I)
+    return min(float(m.group(1)) + 0.5, 30.0) if m else 0.0
+
+
+def chat_json(
+    system: str,
+    user: str,
+    *,
+    max_tokens: int = 4000,
+    model: str | None = None,
+    retries: int = 4,
+) -> dict:
+    """Send one prompt, parse the reply as a JSON object.
+
+    Retries rate-limit / transient errors with the server-suggested delay
+    (Groq free tier throttles aggressively). Raises after ``retries``.
+    """
     r = resolve()
     if r is None:
         raise RuntimeError("no LLM provider configured")
-    provider, model = r
+    provider, default_model = r
+    use_model = model or default_model
 
-    if provider in ("groq", "openai"):
-        client = _openai_client(provider)
-        resp = client.chat.completions.create(
-            model=model,
-            temperature=0,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        )
-        text = resp.choices[0].message.content or "{}"
-    else:  # anthropic
-        import anthropic
+    last_err: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            if provider in ("groq", "openai"):
+                client = _openai_client(provider)
+                resp = client.chat.completions.create(
+                    model=use_model,
+                    temperature=0,
+                    max_tokens=max_tokens,
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                )
+                text = resp.choices[0].message.content or "{}"
+            else:  # anthropic
+                import anthropic
 
-        client = anthropic.Anthropic()
-        resp = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=system + "\n\nRespond with a single JSON object and nothing else.",
-            messages=[{"role": "user", "content": user}],
-        )
-        text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+                client = anthropic.Anthropic()
+                resp = client.messages.create(
+                    model=use_model,
+                    max_tokens=max_tokens,
+                    system=system + "\n\nRespond with a single JSON object and nothing else.",
+                    messages=[{"role": "user", "content": user}],
+                )
+                text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
 
-    text = text.strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end != -1:
-        text = text[start : end + 1]
-    return json.loads(text)
+            text = text.strip()
+            s, e = text.find("{"), text.rfind("}")
+            if s != -1 and e != -1:
+                text = text[s : e + 1]
+            return json.loads(text)
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            msg = str(exc).lower()
+            if attempt < retries and any(k in msg for k in _RETRYABLE):
+                time.sleep(_retry_after(exc) or (2.0 * (attempt + 1)))
+                continue
+            raise
+    raise last_err  # pragma: no cover
 
 
 def reset_cache() -> None:
